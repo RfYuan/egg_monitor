@@ -12,6 +12,7 @@ from datetime import datetime, date
 from typing import Optional
 from src.storage.database import SessionLocal
 from src.storage.crud import get_futures_quotes, get_spot_prices, get_futures_receipts
+from src.collectors.futures_collector import SUPPORTED_SYMBOLS
 from src.notification.feishu import send_feishu_message
 from src.utils.logger import log
 
@@ -159,7 +160,7 @@ def send_daily_report(symbol: str = "JD2609") -> bool:
 
 def job_send_daily_report():
     """定时任务：发送每日数据报告"""
-    send_daily_report("JD2609")
+    send_multi_contract_report(SUPPORTED_SYMBOLS)
 
 
 # 支持多合约推送

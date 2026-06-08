@@ -96,7 +96,7 @@ def fetch_history(symbol: str, start_date: str, end_date: Optional[str] = None) 
 
     # ---- 2. 计算缺失日期 ----
     all_dates = _date_range(start_date, end_date)
-    missing_dates = all_dates - existing_dates & all_dates
+    missing_dates = all_dates - existing_dates
 
     if not missing_dates:
         log.info(f"[CACHE FULL] {symbol}: all {len(all_dates)} dates already in DB")
