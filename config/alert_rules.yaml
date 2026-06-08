@@ -1,0 +1,46 @@
+rules:
+  - id: price_stop_loss
+    name: 价格止损预警
+    level: danger
+    description: 当JD2609价格跌破止损位
+    condition:
+      type: price_below
+      symbol: DCE.jd2609
+      threshold: 3750
+    action:
+      notify: true
+      message: "⚠️ 【危险预警】JD2609价格已跌破止损位3750，建议立即平仓！"
+
+  - id: price_target_near
+    name: 目标价位接近
+    level: info
+    description: 当JD2609价格接近目标位
+    condition:
+      type: price_above
+      symbol: DCE.jd2609
+      threshold: 6300
+    action:
+      notify: true
+      message: "📈 【提示】JD2609价格已接近目标位6500"
+
+  - id: receipt_surge
+    name: 仓单大幅增加
+    level: warning
+    description: 当鸡蛋仓单单日增幅超过20%
+    condition:
+      type: receipt_increase
+      threshold: 0.2
+    action:
+      notify: true
+      message: "⚠️ 【预警】鸡蛋仓单大幅增加，注意库存风险"
+
+  - id: inventory_rise
+    name: 在产蛋鸡存栏上升
+    level: warning
+    description: 当在产蛋鸡存栏连续两周上升
+    condition:
+      type: inventory_rise
+      weeks: 2
+    action:
+      notify: true
+      message: "⚠️ 【预警】在产蛋鸡存栏连续上升，供应增加风险"
