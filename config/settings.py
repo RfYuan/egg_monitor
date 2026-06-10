@@ -11,6 +11,11 @@ class Settings:
     TQSDK_USERNAME = os.getenv("TQSDK_USERNAME", "")
     TQSDK_PASSWORD = os.getenv("TQSDK_PASSWORD", "")
     
+    # 大商所API配置
+    DCE_API_KEY = os.getenv("DCE_API_KEY", "")
+    DCE_API_SECRET = os.getenv("DCE_API_SECRET", "")
+    DCE_API_URL = os.getenv("DCE_API_URL", "https://api.dce.com.cn")
+    
     DB_PATH = BASE_DIR / os.getenv("DB_PATH", "data/db/egg_monitor.db")
     DB_URL = f"sqlite:///{DB_PATH}"
     

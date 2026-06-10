@@ -1,0 +1,53 @@
+# 爬虫配置文件
+# 统一管理所有爬虫参数
+
+spot_price:
+  enabled: true
+  schedule: "0 10 * * *"  # 每日10:00
+  request_interval: 2      # 请求间隔（秒）
+  max_retries: 3          # 最大重试次数
+  use_local: false        # 是否使用本地HTML文件（开发测试用）
+  save_raw_html: true     # 是否保存原始HTML
+  local_html_dir: "data/raw_html/spot_price"
+  sources:
+    - name: "农业农村部"
+      url: "http://www.moa.gov.cn/"
+      enabled: true
+    - name: "生意社"
+      url: "https://www.100ppi.com/"
+      enabled: false  # 待开发
+
+risk_monitor:
+  enabled: true
+  schedule: "0 9 * * *"    # 每日09:00
+  request_interval: 2
+  max_retries: 3
+  use_local: false
+  save_raw_html: true
+  local_html_dir: "data/raw_html/risk_monitor"
+  keywords:
+    - "禽流感"
+    - "扑杀"
+    - "活禽关停"
+    - "储备蛋"
+    - "抛储"
+    - "洪涝"
+    - "暴雨"
+  sources:
+    - name: "中国禽病网"
+      url: "http://www.qinbing.cn/"
+      enabled: true
+    - name: "财联社"
+      url: "https://www.cls.cn/"
+      enabled: false  # 待开发
+
+database_backup:
+  enabled: false          # 跳过，先不实现
+  schedule: "0 2 * * 0"   # 每周日02:00
+  retention_days: 90      # 保留90天
+
+# HTTP请求全局配置
+http:
+  timeout: 30             # 请求超时（秒）
+  min_interval: 1.0       # 最小请求间隔（秒）
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

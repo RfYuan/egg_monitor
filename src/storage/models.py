@@ -24,6 +24,21 @@ class FuturesReceipt(Base):
     symbol = Column(String(20), nullable=False, index=True)
     receipt_qty = Column(Integer, nullable=False)
     change = Column(Integer, nullable=False)
+    warehouse = Column(String(100), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+class FuturesHolding(Base):
+    __tablename__ = "futures_holding"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    long_qty = Column(Integer, nullable=False)
+    short_qty = Column(Integer, nullable=False)
+    long_change = Column(Integer, nullable=True)
+    short_change = Column(Integer, nullable=True)
+    long_ratio = Column(Numeric(6, 2), nullable=True)
+    short_ratio = Column(Numeric(6, 2), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
 class SpotPrice(Base):

@@ -71,6 +71,33 @@ def get_latest_spot_data(category: str = "egg") -> Optional[dict]:
         db.close()
 
 
+def get_all_spot_prices() -> dict:
+    """获取所有现货价格（鸡蛋、玉米、豆粕）"""
+    result = {}
+    
+    # 鸡蛋价格
+    egg_data = get_latest_spot_data("egg")
+    if egg_data:
+        result["egg"] = egg_data
+    
+    # 玉米价格
+    corn_data = get_latest_spot_data("corn")
+    if corn_data:
+        result["corn"] = corn_data
+    
+    # 豆粕价格
+    soymeal_data = get_latest_spot_data("soymeal")
+    if soymeal_data:
+        result["soymeal"] = soymeal_data
+    
+    # 淘汰禽价格
+    eliminate_data = get_latest_spot_data("eliminate")
+    if eliminate_data:
+        result["eliminate"] = eliminate_data
+    
+    return result
+
+
 def get_latest_receipt_data(symbol: str = "jd") -> Optional[dict]:
     """获取最新仓单数据"""
     db = SessionLocal()
@@ -94,7 +121,7 @@ def calculate_basis(futures_close: float, spot_price: float) -> float:
     return spot_price - futures_close
 
 
-def format_daily_report(futures_data: dict, spot_data: Optional[dict], receipt_data: Optional[dict]) -> str:
+def format_daily_report(futures_data: dict, spot_prices: dict, receipt_data: Optional[dict]) -> str:
     """格式化每日数据报告"""
     lines = []
     
@@ -107,16 +134,42 @@ def format_daily_report(futures_data: dict, spot_data: Optional[dict], receipt_d
     lines.append(f"成交量：{futures_data['volume']}手")
     lines.append("")
     
-    # 现货数据
-    if spot_data:
-        lines.append(f"**现货价格：{spot_data['region']}鸡蛋 {spot_data['price']}元/{spot_data['unit']}**")
+    # 现货数据 - 鸡蛋
+    if "egg" in spot_prices:
+        egg_data = spot_prices["egg"]
+        lines.append(f"**鸡蛋现货：{egg_data['region']} {egg_data['price']}{egg_data['unit']}**")
         
-        # 计算基差
-        basis = calculate_basis(futures_data['close'], spot_data['price'])
-        basis_str = f"+{basis}" if basis >= 0 else str(basis)
-        lines.append(f"基差：{basis_str} (现货-期货)")
+        # 计算基差（鸡蛋期货单位是元/500kg，现货也是元/500kg）
+        # 注意：期货价格单位是元/500kg，现货价格单位也是元/500kg
+        basis = calculate_basis(futures_data['close'], egg_data['price'])
+        basis_str = f"+{basis:.0f}" if basis >= 0 else f"{basis:.0f}"
+        lines.append(f"基差：{basis_str}元 (现货-期货)")
     else:
-        lines.append("**现货价格：暂无数据**")
+        lines.append("**鸡蛋现货：暂无数据**")
+    lines.append("")
+    
+    # 现货数据 - 玉米
+    if "corn" in spot_prices:
+        corn_data = spot_prices["corn"]
+        lines.append(f"**玉米现货：{corn_data['region']} {corn_data['price']}{corn_data['unit']}**")
+    else:
+        lines.append("**玉米现货：暂无数据**")
+    lines.append("")
+    
+    # 现货数据 - 豆粕
+    if "soymeal" in spot_prices:
+        soymeal_data = spot_prices["soymeal"]
+        lines.append(f"**豆粕现货：{soymeal_data['region']} {soymeal_data['price']}{soymeal_data['unit']}**")
+    else:
+        lines.append("**豆粕现货：暂无数据**")
+    lines.append("")
+    
+    # 现货数据 - 淘汰禽
+    if "eliminate" in spot_prices:
+        eliminate_data = spot_prices["eliminate"]
+        lines.append(f"**淘汰禽现货：{eliminate_data['region']} {eliminate_data['price']}{eliminate_data['unit']}**")
+    else:
+        lines.append("**淘汰禽现货：暂无数据**")
     lines.append("")
     
     # 仓单数据
@@ -139,13 +192,13 @@ def send_daily_report(symbol: str = "JD2609") -> bool:
         log.warning(f"No futures data available for {symbol}")
         return False
     
-    spot_data = get_latest_spot_data("egg")
+    spot_prices = get_all_spot_prices()
     receipt_data = get_latest_receipt_data("jd")
     
     # 格式化报告
     today = date.today().strftime("%Y-%m-%d")
     title = f"📊 {symbol} 每日数据汇总 ({today})"
-    content = format_daily_report(futures_data, spot_data, receipt_data)
+    content = format_daily_report(futures_data, spot_prices, receipt_data)
     
     # 发送飞书消息
     result = send_feishu_message(title, content, level="info")

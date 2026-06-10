@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from src.storage.models import (
     FuturesQuote,
     FuturesReceipt,
+    FuturesHolding,
     SpotPrice,
     IndustrialInventory,
     AlertRecord,
@@ -45,6 +46,31 @@ def create_futures_receipt(db: Session, receipt: dict):
 
 def get_futures_receipts(db: Session, symbol: str, limit: int = 100):
     return db.query(FuturesReceipt).filter(FuturesReceipt.symbol == symbol).order_by(FuturesReceipt.date.desc()).limit(limit).all()
+
+def get_futures_receipts_by_date(db: Session, symbol: str, target_date: date):
+    """查询指定合约和日期的仓单数据"""
+    return db.query(FuturesReceipt).filter(
+        FuturesReceipt.symbol == symbol,
+        FuturesReceipt.date == target_date
+    ).all()
+
+# Futures Holding
+def create_futures_holding(db: Session, holding: dict):
+    db_holding = FuturesHolding(**holding)
+    db.add(db_holding)
+    db.commit()
+    db.refresh(db_holding)
+    return db_holding
+
+def get_futures_holdings(db: Session, symbol: str, limit: int = 100):
+    return db.query(FuturesHolding).filter(FuturesHolding.symbol == symbol).order_by(FuturesHolding.date.desc()).limit(limit).all()
+
+def get_futures_holdings_by_date(db: Session, symbol: str, target_date: date):
+    """查询指定合约和日期的持仓数据"""
+    return db.query(FuturesHolding).filter(
+        FuturesHolding.symbol == symbol,
+        FuturesHolding.date == target_date
+    ).all()
 
 # Spot Price
 def create_spot_price(db: Session, price: dict):

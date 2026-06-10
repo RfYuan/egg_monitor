@@ -48,7 +48,20 @@ python src/main.py
 
 ### 后台运行（Linux）
 ```bash
-nohup python src/main.py > logs/monitor.log 2>&1 &
+cd /home/app/egg_monitor
+git pull
+sudo systemctl restart egg-monitor
+```
+
+```
+# 查看服务状态（应该显示active (running)）
+systemctl status egg-monitor
+
+# 实时查看日志（按Ctrl+C退出）
+journalctl -u egg-monitor -f
+
+# 查看今天的所有日志
+journalctl -u egg-monitor --since today
 ```
 
 ### 退出虚拟环境
