@@ -252,7 +252,8 @@ class DCEClient:
         Returns:
             仓单数据列表
         """
-        path = "/delivery/warehouse/receipt"
+        # 使用大商所官方API的正确路径
+        path = "/forward/publicweb/dailystat/wbillWeeklyQuotes"
         
         # 确保日期格式为 YYYYMMDD
         if trade_date:
@@ -267,26 +268,42 @@ class DCEClient:
                 date_str = (today - timedelta(days=1)).strftime("%Y%m%d")
         
         params = {
-            "varietyCode": "jd",  # 鸡蛋品种
-            "tradeDate": date_str
+            "tradeDate": date_str,
+            "varietyId": "all"  # 获取所有品种，然后筛选鸡蛋
         }
         
-        data = self._request("GET", path, params=params)
+        data = self._request("POST", path, params=params)
         
         # 处理返回数据，转为标准格式
-        if data and isinstance(data, list):
+        if data and isinstance(data, dict):
+            # 获取entityList字段
+            entity_list = data.get("entityList", [])
+            
+            if not entity_list:
+                log.warning("[DCE] 仓单数据entityList为空")
+                return None
+            
             result = []
-            for item in data:
+            for item in entity_list:
+                variety_order = item.get("varietyOrder", "")
+                
+                # 只处理鸡蛋品种 (jd)
+                if not variety_order or variety_order.lower() != "jd":
+                    continue
+                
                 result.append({
-                    "variety": item.get("varietyName", ""),
-                    "contract_id": item.get("contractId", ""),
-                    "receipt_qty": item.get("receiptQty", 0),
-                    "change": item.get("changeQty", 0),
-                    "warehouse": item.get("warehouseName", "")
+                    "variety": item.get("variety", ""),
+                    "contract_id": variety_order.upper(),
+                    "receipt_qty": int(item.get("wbillQty", 0)),
+                    "change": int(item.get("diff", 0)),
+                    "warehouse": item.get("whAbbr", "")
                 })
+            
+            log.info(f"[DCE] 获取仓单数据成功，鸡蛋品种共 {len(result)} 条")
             return result
         
-        return data
+        log.error(f"[DCE] 仓单数据格式异常: {type(data)}")
+        return None
     
     def get_top20_holding(self, contract_id: str = None, trade_date: str = None) -> Optional[Dict]:
         """

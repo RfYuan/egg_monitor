@@ -58,10 +58,11 @@ class IndustrialInventory(Base):
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     date = Column(Date, nullable=False, index=True)
-    inventory = Column(Numeric(12, 2), nullable=False)
-    mom = Column(Numeric(6, 2), nullable=True)
-    yoy = Column(Numeric(6, 2), nullable=True)
-    source = Column(String(50), nullable=False)
+    category = Column(String(50), nullable=False, index=True)  # 数据类型：存栏量、鸡苗销量、淘汰鸡出栏、冷库库存等
+    inventory = Column(Numeric(12, 2), nullable=False)      # 存栏数量
+    mom = Column(Numeric(6, 2), nullable=True)               # 环比变化
+    yoy = Column(Numeric(6, 2), nullable=True)               # 同比变化
+    source = Column(String(50), nullable=False)               # 数据来源
     created_at = Column(DateTime, server_default=func.now())
 
 class AlertRecord(Base):

@@ -94,8 +94,18 @@ def create_industrial_inventory(db: Session, inventory: dict):
     db.refresh(db_inv)
     return db_inv
 
-def get_industrial_inventories(db: Session, limit: int = 100):
-    return db.query(IndustrialInventory).order_by(IndustrialInventory.date.desc()).limit(limit).all()
+def get_industrial_inventories(db: Session, category: Optional[str] = None, limit: int = 100):
+    query = db.query(IndustrialInventory)
+    if category:
+        query = query.filter(IndustrialInventory.category == category)
+    return query.order_by(IndustrialInventory.date.desc()).limit(limit).all()
+
+def get_latest_industrial_inventory(db: Session, category: str) -> Optional[IndustrialInventory]:
+    """获取指定类型的最新产业数据"""
+    return (db.query(IndustrialInventory)
+            .filter(IndustrialInventory.category == category)
+            .order_by(IndustrialInventory.date.desc())
+            .first())
 
 # Alert Record
 def create_alert_record(db: Session, alert: dict):

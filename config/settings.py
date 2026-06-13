@@ -16,6 +16,9 @@ class Settings:
     DCE_API_SECRET = os.getenv("DCE_API_SECRET", "")
     DCE_API_URL = os.getenv("DCE_API_URL", "https://api.dce.com.cn")
     
+    # 仓单采集配置（已修复API路径问题）
+    ENABLE_RECEIPT_COLLECTION = os.getenv("ENABLE_RECEIPT_COLLECTION", "true").lower() == "true"
+    
     DB_PATH = BASE_DIR / os.getenv("DB_PATH", "data/db/egg_monitor.db")
     DB_URL = f"sqlite:///{DB_PATH}"
     

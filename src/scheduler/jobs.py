@@ -6,6 +6,9 @@ from src.collectors.futures_receipt_collector import collect_and_save_receipt
 from src.collectors.futures_holding_collector import collect_and_save_holding
 from src.analysis.rule_engine import run_all_checks
 from src.notification.daily_report import job_send_daily_report
+from src.notification.daily_summary import send_daily_summary
+from src.utils.backup import run_backup
+from src.utils.black_swan_monitor import check_black_swan
 from src.utils.logger import log
 
 def job_collect_futures():
@@ -24,6 +27,18 @@ def job_collect_receipt():
 def job_collect_holding():
     log.info("Running DCE holding collection job...")
     collect_and_save_holding("JD2609")
+
+def job_daily_summary():
+    log.info("Running daily summary push job...")
+    send_daily_summary()
+
+def job_black_swan():
+    log.info("Running black swan monitoring job...")
+    check_black_swan()
+
+def job_backup():
+    log.info("Running weekly backup job...")
+    run_backup()
 
 def start_scheduler():
     scheduler = BlockingScheduler()
@@ -48,6 +63,13 @@ def start_scheduler():
         trigger=CronTrigger(hour=16, minute=0),
         id="daily_report"
     )
+
+    # 每日数据汇总推送（盘后完整数据）
+    scheduler.add_job(
+        job_daily_summary,
+        trigger=CronTrigger(hour=16, minute=30),
+        id="daily_summary"
+    )
     
     # 现货价格采集
     scheduler.add_job(
@@ -69,13 +91,30 @@ def start_scheduler():
         trigger=CronTrigger(day_of_week="fri", hour=17, minute=0),
         id="dce_holding"
     )
-    
+
+    # 黑天鹅关键词监测（每日早9点）
+    scheduler.add_job(
+        job_black_swan,
+        trigger=CronTrigger(hour=9, minute=0),
+        id="black_swan_monitor"
+    )
+
+    # 数据备份（每周日0点）
+    scheduler.add_job(
+        job_backup,
+        trigger=CronTrigger(day_of_week="sun", hour=0, minute=0),
+        id="weekly_backup"
+    )
+
     log.info("Scheduler started. Waiting for jobs...")
     log.info("Scheduled jobs:")
     log.info("  - futures_morning: 09:30")
     log.info("  - futures_afternoon: 15:40")
     log.info("  - daily_report: 16:00")
+    log.info("  - daily_summary: 16:30")
     log.info("  - spot_daily: 10:00")
     log.info("  - dce_receipt: 16:30 (每日)")
     log.info("  - dce_holding: 每周五 17:00")
+    log.info("  - black_swan_monitor: 每日 09:00")
+    log.info("  - weekly_backup: 每周日 00:00")
     scheduler.start()
