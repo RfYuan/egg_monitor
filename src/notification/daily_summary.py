@@ -202,7 +202,7 @@ class DailySummaryGenerator:
                     "date": r.date,
                     "receipt_qty": r.receipt_qty,
                     "change": r.change,
-                    "warehouse": r.warehouse
+                    "warehouse": getattr(r, "warehouse", None)
                 }
                 for r in receipts
             ]
