@@ -183,12 +183,33 @@
 | URL | `/delivery/warehouse/receipt` |
 | 请求方式 | GET |
 
-#### 5.2.3 前20持仓数据 ✅ 已实现
+#### 5.2.3 前20持仓数据 ⚠️ 接口问题
 
 | 项目 | 说明 |
 |------|------|
-| URL | `/member/daily/ranking` |
-| 请求方式 | GET |
+| **原接口** | `/member/daily/ranking` - **已失效（返回404）** |
+| **当前方案** | 优先尝试大商所API，失败则自动切换至AKShare |
+| **AKShare接口** | `ak.futures_holding_lg(symbol="DCE.jd", date="20250822")` |
+
+**问题说明：**
+- 原文档中记录的 `/member/daily/ranking` 接口已失效，返回404错误
+- 当前实现采用**双数据源策略**：
+  1. 优先调用大商所官方API
+  2. 失败时自动切换至AKShare备选方案
+
+**数据来源优先级：**
+| 优先级 | 数据源 | 可靠性 | 更新频率 |
+|--------|--------|--------|----------|
+| 1 | 大商所官方API | 高（但接口不稳定） | 每日 |
+| 2 | AKShare | 中 | 每日 |
+
+**代码实现：**
+```python
+# 策略：先尝试大商所API，失败则用AKShare
+raw_data = client.get_top20_holding(contract_id, trade_date)
+if raw_data is None:
+    raw_data = _fetch_holding_from_akshare(contract_id, trade_date)
+```
 
 ### 5.3 配置说明
 

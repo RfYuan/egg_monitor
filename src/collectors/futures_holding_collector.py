@@ -1,6 +1,6 @@
 """
 大商所前20会员持仓数据采集器
-数据来源: 大商所官方API /api/market/top20_holding
+数据来源: 大商所官方API / AKShare备选
 """
 
 from datetime import date, timedelta
@@ -26,6 +26,54 @@ def _get_last_friday() -> date:
     return today - timedelta(days=days_since_friday if days_since_friday > 0 else 7)
 
 
+def _fetch_holding_from_akshare(contract_id: str, trade_date: str) -> Optional[Dict]:
+    """
+    从AKShare获取持仓数据（备选方案）
+    
+    Args:
+        contract_id: 合约代码，如 "JD2609"
+        trade_date: 交易日期，格式 "YYYY-MM-DD"
+    
+    Returns:
+        持仓数据字典或None
+    """
+    try:
+        import akshare as ak
+        
+        log.info(f"[Holding] 尝试从AKShare获取持仓数据: {contract_id} @ {trade_date}")
+        
+        # AKShare大商所持仓排名接口
+        # 接口: futures_dce_position_rank(date="20250822")
+        date_str = trade_date.replace("-", "")
+        
+        df = ak.futures_dce_position_rank(date=date_str)
+        
+        if df is None or df.empty:
+            log.warning(f"[Holding] AKShare返回空数据: {contract_id} @ {trade_date}")
+            return None
+        
+        # 筛选指定合约
+        contract_df = df[df["合约"] == contract_id.upper()]
+        if contract_df.empty:
+            log.warning(f"[Holding] AKShare未找到合约 {contract_id}")
+            return None
+        
+        row = contract_df.iloc[0]
+        
+        return {
+            "long_qty": int(row.get("持买量", 0)),
+            "short_qty": int(row.get("持卖量", 0)),
+            "long_change": int(row.get("持买量增减", 0)),
+            "short_change": int(row.get("持卖量增减", 0)),
+            "buy_list": [],
+            "sell_list": []
+        }
+        
+    except Exception as e:
+        log.error(f"[Holding] AKShare获取持仓数据失败: {e}")
+        return None
+
+
 def collect_holding(contract_id: str, trade_date: date = None) -> bool:
     """
     采集指定合约和日期的持仓数据
@@ -45,22 +93,32 @@ def collect_holding(contract_id: str, trade_date: date = None) -> bool:
     
     db = SessionLocal()
     try:
-        client = get_dce_client()
-        raw_data = client.get_top20_holding(contract_id.upper(), trade_date_str)
-        
-        if raw_data is None:
-            log.error(f"[Holding] API调用失败或无数据: {contract_id} @ {trade_date_str}")
-            notify_warning("DCE_HOLDING", f"持仓数据采集失败: {contract_id} @ {trade_date_str}")
-            return False
-        
         # 检查是否已存在
         existing = get_futures_holdings_by_date(db, contract_id.upper(), trade_date)
         if existing:
             log.info(f"[Holding] 数据已存在，跳过: {contract_id} @ {trade_date_str}")
             return True
         
+        # 方案1: 尝试大商所官方API
+        raw_data = None
+        try:
+            client = get_dce_client()
+            raw_data = client.get_top20_holding(contract_id.upper(), trade_date_str)
+        except Exception as e:
+            log.error(f"[Holding] 大商所API调用失败: {e}")
+        
+        # 方案2: 如果官方API失败，尝试AKShare
+        if raw_data is None:
+            log.info(f"[Holding] 大商所API无数据，尝试AKShare备选方案")
+            raw_data = _fetch_holding_from_akshare(contract_id, trade_date_str)
+        
+        # 不使用模拟数据，所有数据源失败则返回False
+        if raw_data is None:
+            log.error(f"[Holding] 所有数据源均失败: {contract_id} @ {trade_date_str}")
+            notify_warning("DCE_HOLDING", f"持仓数据采集失败: {contract_id} @ {trade_date_str}")
+            return False
+        
         # 提取汇总数据
-        # API返回结构示例: {"long_qty": 12345, "short_qty": 12300, "long_change": 100, "short_change": -50, ...}
         long_qty = raw_data.get("long_qty", 0)
         short_qty = raw_data.get("short_qty", 0)
         long_change = raw_data.get("long_change", 0)
