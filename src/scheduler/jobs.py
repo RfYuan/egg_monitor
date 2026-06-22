@@ -2,6 +2,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from src.collectors.futures_collector import collect_and_save_latest, SUPPORTED_SYMBOLS
 from src.collectors.spot_collector import collect_and_save_spot
+from src.collectors.cnfowl_spider import collect_cnfowl_spot
 from src.collectors.futures_receipt_collector import collect_and_save_receipt
 from src.collectors.futures_holding_collector import collect_and_save_holding
 from src.analysis.rule_engine import run_all_checks
@@ -18,7 +19,15 @@ def job_collect_futures():
 
 def job_collect_spot():
     log.info("Running spot price collection job...")
-    collect_and_save_spot()
+    # 优先使用养殖网爬虫采集现货价格
+    log.info("[Spot] 尝试使用养殖网爬虫采集现货价格...")
+    success = collect_cnfowl_spot(use_local=False)
+    if success:
+        log.info("[Spot] 养殖网爬虫采集成功")
+    else:
+        # 养殖网失败，使用备用数据源
+        log.warning("[Spot] 养殖网爬虫采集失败，使用备用数据源")
+        collect_and_save_spot()
 
 def job_collect_receipt():
     log.info("Running DCE receipt collection job...")

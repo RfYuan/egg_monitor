@@ -17,18 +17,30 @@ SUPPORTED_SYMBOLS = ["jd2607", "jd2608", "jd2609"]
 #  公开接口 — 均走 DB 优先缓存策略
 # ===================================================================
 
+def _is_today_data(data_date: date) -> bool:
+    """检查数据日期是否为今天"""
+    return data_date == date.today()
+
+
+def _is_data_fresh(data_date: date, max_days_old: int = 1) -> bool:
+    """检查数据是否新鲜（不超过指定天数）"""
+    return (date.today() - data_date).days <= max_days_old
+
+
 def fetch_latest_quote(symbol: str) -> Optional[Dict]:
     """
-    获取单个合约最新一日行情（优先从数据库读取）
+    获取单个合约最新一日行情（优先从数据库读取，但严格验证日期）
 
     策略：
       1. 查库 → 最近一条记录的日期 == 今天 → 直接返回
       2. 库中无今天数据 → 调 AKShare 获取最新并存入
+      3. API也失败 → 返回None（**禁止返回过期数据**）
+
+    重要原则：禁止返回过期数据误导用户
     """
     today = date.today()
     db = SessionLocal()
     try:
-        # 1) 尝试从 DB 取最近一条
         rows = get_futures_quotes_by_date_range(
             db, symbol.upper(),
             datetime(today.year, today.month, today.day),
@@ -43,17 +55,20 @@ def fetch_latest_quote(symbol: str) -> Optional[Dict]:
     finally:
         db.close()
 
-    # 2) 库中没有 → 调 API
     log.info(f"[CACHE MISS] {symbol} fetching latest from AKShare...")
     try:
         df = _fetch_akshare(symbol)
         if df is not None and not df.empty:
             row = _row_to_dict(df.iloc[-1], symbol)
-            # 写回 DB 供下次命中
-            _save_one(row)
-            return row
+            if _is_today_data(row["datetime"].date()):
+                _save_one(row)
+                return row
+            else:
+                log.warning(f"[DATA STALE] {symbol} API returned non-today data: {row['datetime'].date()}, ignoring")
     except Exception as e:
         log.error(f"API fetch failed for {symbol}: {e}")
+    
+    log.error(f"[CRITICAL] {symbol} No valid today data available! Cannot return stale data.")
     return None
 
 

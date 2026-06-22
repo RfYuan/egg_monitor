@@ -5,7 +5,7 @@ rules:
     description: 当JD2609价格跌破止损位
     condition:
       type: price_below
-      symbol: DCE.jd2609
+      symbol: JD2609
       threshold: 3750
     action:
       notify: true
@@ -17,7 +17,7 @@ rules:
     description: 当JD2609价格接近目标位
     condition:
       type: price_above
-      symbol: DCE.jd2609
+      symbol: JD2609
       threshold: 6300
     action:
       notify: true

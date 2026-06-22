@@ -55,42 +55,50 @@ class DailySummaryGenerator:
         """
         logger.info(f"[DailySummary] 开始生成 {self.date} 每日汇总")
 
-        # 收集各类数据
         futures_data = self._get_futures_data()
         spot_data = self._get_spot_data()
         receipt_data = self._get_receipt_data()
         industrial_data = self._get_industrial_data()
 
-        # 构建消息
+        if not futures_data:
+            logger.error("[DailySummary] 期货数据缺失，生成数据异常警报")
+            return f"""⚠️ **【数据异常】今日期货数据获取失败**
+
+**紧急通知：JD2609 今日数据获取失败**
+
+原因：期货行情数据缺失或过期
+
+建议：
+1. 检查网络连接和 AKShare API 可用性
+2. 手动确认 JD2609 今日收盘价
+3. 关注系统日志排查问题
+
+🕐 检测时间：{self.date}"""
+
         message_parts = []
 
-        # 1. 标题和时间
         message_parts.append(self._format_header())
 
-        # 2. 期货行情
         if futures_data:
             message_parts.append(self._format_futures(futures_data))
 
-        # 3. 现货价格
         if spot_data:
             message_parts.append(self._format_spot(spot_data))
+        else:
+            message_parts.append("💰 **现货价格**: 无数据")
 
-        # 4. 仓单数据
         if receipt_data:
             message_parts.append(self._format_receipt(receipt_data))
         else:
             message_parts.append("📦 **仓单数据**: 无数据")
 
-        # 5. 产业数据
         if industrial_data:
             message_parts.append(self._format_industrial(industrial_data))
         else:
-            message_parts.append("🏭 **产业数据**: 无最新数据（请人工录入）")
+            message_parts.append("🏭 **产业数据**: ⚠️ 数据已过期（超过7天），请人工录入最新数据")
 
-        # 6. 预警状态
         message_parts.append(self._format_alerts())
 
-        # 7. 尾注
         message_parts.append(self._format_footer())
 
         message = "\n\n".join(message_parts)
@@ -99,30 +107,41 @@ class DailySummaryGenerator:
 
         return message
 
+    def _is_data_today(self, data_date) -> bool:
+        """检查数据日期是否为今天"""
+        today = date.today()
+        if hasattr(data_date, 'date'):
+            return data_date.date() == today
+        return data_date == today
+
+
     def _get_futures_data(self) -> Optional[Dict]:
-        """获取期货行情数据"""
+        """获取期货行情数据（严格验证日期）"""
         try:
             db = next(get_db())
 
-            # 获取JD2609行情
             quotes = get_futures_quotes(db, "JD2609", limit=2)
 
             if not quotes:
-                logger.warning("[DailySummary] 未找到期货行情数据")
+                logger.error("[DailySummary] 未找到期货行情数据")
                 return None
 
-            # 最新行情
             latest = quotes[0]
+            data_date = latest.datetime.date() if hasattr(latest.datetime, 'date') else latest.datetime
+            
+            if not self._is_data_today(latest.datetime):
+                days_old = (date.today() - data_date).days if data_date else 999
+                logger.error(f"[DATA STALE] JD2609 latest data is {days_old} days old ({data_date}), cannot use!")
+                return None
+
             prev = quotes[1] if len(quotes) > 1 else None
 
-            # 计算涨跌幅
             change = 0
             change_pct = 0
             if prev and prev.close:
                 change = float(latest.close) - float(prev.close)
                 change_pct = (change / float(prev.close)) * 100
 
-            # 计算持仓变化
             holding_change = 0
             holdings = get_futures_holdings(db, "JD2609", limit=2)
             if len(holdings) > 1:
@@ -146,41 +165,41 @@ class DailySummaryGenerator:
             return None
 
     def _get_spot_data(self) -> Optional[Dict]:
-        """获取现货价格数据"""
+        """获取现货价格数据（支持养殖网数据格式）"""
         try:
             db = next(get_db())
 
-            # 获取最新现货价格
-            egg_prices = get_spot_prices(db, category="鸡蛋", limit=1)
-            corn_prices = get_spot_prices(db, category="玉米", limit=1)
-            soy_prices = get_spot_prices(db, category="豆粕", limit=1)
+            # 养殖网爬虫使用英文category：egg, corn, soymeal, eliminate
+            # 备用数据源可能使用中文category：鸡蛋, 玉米, 豆粕
+            category_map = {
+                "鸡蛋": ["egg", "鸡蛋"],
+                "玉米": ["corn", "玉米"],
+                "豆粕": ["soymeal", "豆粕"],
+                "淘汰禽": ["eliminate", "淘汰禽"]
+            }
 
             data = {}
 
-            if egg_prices:
-                egg = egg_prices[0]
-                data["鸡蛋"] = {
-                    "price": float(egg.price),
-                    "unit": egg.unit,
-                    "region": egg.region,
-                    "source": egg.source
-                }
-
-            if corn_prices:
-                corn = corn_prices[0]
-                data["玉米"] = {
-                    "price": float(corn.price),
-                    "unit": corn.unit,
-                    "region": corn.region
-                }
-
-            if soy_prices:
-                soy = soy_prices[0]
-                data["豆粕"] = {
-                    "price": float(soy.price),
-                    "unit": soy.unit,
-                    "region": soy.region
-                }
+            for display_name, categories in category_map.items():
+                for cat in categories:
+                    prices = get_spot_prices(db, category=cat, limit=5)
+                    if prices:
+                        # 优先使用山东地区，否则取第一条
+                        target_price = None
+                        for p in prices:
+                            if "山东" in p.region:
+                                target_price = p
+                                break
+                        if not target_price:
+                            target_price = prices[0]
+                        
+                        data[display_name] = {
+                            "price": float(target_price.price),
+                            "unit": target_price.unit,
+                            "region": target_price.region,
+                            "source": target_price.source
+                        }
+                        break
 
             return data if data else None
 
@@ -212,19 +231,27 @@ class DailySummaryGenerator:
             return None
 
     def _get_industrial_data(self) -> Optional[Dict]:
-        """获取产业数据"""
+        """获取产业数据（严格验证数据新鲜度）"""
         try:
             db = next(get_db())
 
-            # 获取各类型最新数据
             categories = ["在产蛋鸡存栏", "鸡苗周销量", "淘汰鸡出栏", "冷库鸡蛋库存"]
-
             data = {}
+            stale_count = 0
 
             for category in categories:
                 inventories = get_industrial_inventories(db, category=category, limit=1)
                 if inventories:
                     inv = inventories[0]
+                    inv_date = inv.date if hasattr(inv.date, 'date') else inv.date
+                    
+                    # 产业数据每周更新，超过7天视为过期
+                    days_old = (date.today() - inv_date).days if inv_date else 999
+                    if days_old > 7:
+                        logger.warning(f"[DATA STALE] {category} 数据已过期 {days_old} 天 ({inv_date})")
+                        stale_count += 1
+                        continue  # 跳过过期数据
+                    
                     data[category] = {
                         "inventory": float(inv.inventory),
                         "mom": float(inv.mom) if inv.mom else None,
@@ -232,6 +259,10 @@ class DailySummaryGenerator:
                         "date": inv.date,
                         "source": inv.source
                     }
+
+            if stale_count > 0:
+                logger.error(f"[DailySummary] {stale_count}/{len(categories)} 项产业数据已过期，返回 None")
+                return None
 
             return data if data else None
 

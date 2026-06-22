@@ -6,9 +6,11 @@
 - 包含期货收盘价、涨跌幅、持仓变化
 - 包含现货价格、仓单数据（如有）
 - 计算基差等关键指标
+
+重要原则：禁止推送过期数据误导用户！
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 from src.storage.database import SessionLocal
 from src.storage.crud import get_futures_quotes, get_spot_prices, get_futures_receipts
@@ -17,23 +19,48 @@ from src.notification.feishu import send_feishu_message
 from src.utils.logger import log
 
 
+def _is_data_today(data_date_str: str) -> bool:
+    """检查数据日期是否为今天"""
+    try:
+        data_date = datetime.strptime(data_date_str, "%Y-%m-%d").date()
+        return data_date == date.today()
+    except:
+        return False
+
+
+def _is_data_fresh(data_date_str: str, max_days: int = 1) -> bool:
+    """检查数据是否新鲜（不超过指定天数）"""
+    try:
+        data_date = datetime.strptime(data_date_str, "%Y-%m-%d").date()
+        return (date.today() - data_date).days <= max_days
+    except:
+        return False
+
+
 def get_latest_futures_data(symbol: str = "JD2609") -> Optional[dict]:
-    """获取最新期货数据"""
+    """获取最新期货数据（严格验证日期）"""
     db = SessionLocal()
     try:
         quotes = get_futures_quotes(db, symbol, limit=2)
         if not quotes:
+            log.error(f"[DailyReport] No futures data found for {symbol}")
             return None
         
         latest = quotes[0]
+        data_date = latest.datetime.date()
+        today = date.today()
+        
+        if data_date != today:
+            days_old = (today - data_date).days
+            log.error(f"[DATA STALE] {symbol} latest data is {days_old} days old ({data_date}), cannot use!")
+            return None
+        
         prev = quotes[1] if len(quotes) > 1 else None
         
-        # 计算涨跌幅
         change_pct = 0.0
         if prev and prev.close:
             change_pct = ((latest.close - prev.close) / prev.close) * 100
         
-        # 计算持仓变化
         oi_change = 0
         if prev and prev.open_interest:
             oi_change = latest.open_interest - prev.open_interest
@@ -121,7 +148,7 @@ def calculate_basis(futures_close: float, spot_price: float) -> float:
     return spot_price - futures_close
 
 
-def format_daily_report(futures_data: dict, spot_prices: dict, receipt_data: Optional[dict]) -> str:
+def format_daily_report(futures_data: dict, spot_prices: Optional[dict], receipt_data: Optional[dict]) -> str:
     """格式化每日数据报告"""
     lines = []
     
@@ -135,12 +162,10 @@ def format_daily_report(futures_data: dict, spot_prices: dict, receipt_data: Opt
     lines.append("")
     
     # 现货数据 - 鸡蛋
-    if "egg" in spot_prices:
+    if spot_prices and "egg" in spot_prices:
         egg_data = spot_prices["egg"]
         lines.append(f"**鸡蛋现货：{egg_data['region']} {egg_data['price']}{egg_data['unit']}**")
         
-        # 计算基差（鸡蛋期货单位是元/500kg，现货也是元/500kg）
-        # 注意：期货价格单位是元/500kg，现货价格单位也是元/500kg
         basis = calculate_basis(futures_data['close'], egg_data['price'])
         basis_str = f"+{basis:.0f}" if basis >= 0 else f"{basis:.0f}"
         lines.append(f"基差：{basis_str}元 (现货-期货)")
@@ -149,7 +174,7 @@ def format_daily_report(futures_data: dict, spot_prices: dict, receipt_data: Opt
     lines.append("")
     
     # 现货数据 - 玉米
-    if "corn" in spot_prices:
+    if spot_prices and "corn" in spot_prices:
         corn_data = spot_prices["corn"]
         lines.append(f"**玉米现货：{corn_data['region']} {corn_data['price']}{corn_data['unit']}**")
     else:
@@ -157,7 +182,7 @@ def format_daily_report(futures_data: dict, spot_prices: dict, receipt_data: Opt
     lines.append("")
     
     # 现货数据 - 豆粕
-    if "soymeal" in spot_prices:
+    if spot_prices and "soymeal" in spot_prices:
         soymeal_data = spot_prices["soymeal"]
         lines.append(f"**豆粕现货：{soymeal_data['region']} {soymeal_data['price']}{soymeal_data['unit']}**")
     else:
@@ -165,7 +190,7 @@ def format_daily_report(futures_data: dict, spot_prices: dict, receipt_data: Opt
     lines.append("")
     
     # 现货数据 - 淘汰禽
-    if "eliminate" in spot_prices:
+    if spot_prices and "eliminate" in spot_prices:
         eliminate_data = spot_prices["eliminate"]
         lines.append(f"**淘汰禽现货：{eliminate_data['region']} {eliminate_data['price']}{eliminate_data['unit']}**")
     else:
@@ -183,24 +208,33 @@ def format_daily_report(futures_data: dict, spot_prices: dict, receipt_data: Opt
 
 
 def send_daily_report(symbol: str = "JD2609") -> bool:
-    """发送每日数据报告"""
+    """发送每日数据报告（严格验证数据有效性）"""
     log.info(f"Generating daily report for {symbol}...")
     
-    # 获取数据
     futures_data = get_latest_futures_data(symbol)
     if not futures_data:
-        log.warning(f"No futures data available for {symbol}")
-        return False
+        log.error(f"[CRITICAL] No valid futures data for {symbol}! Sending data missing alert.")
+        today = date.today().strftime("%Y-%m-%d")
+        title = f"⚠️ 【数据异常】{symbol} 今日数据获取失败"
+        content = f"""**紧急通知：{symbol} 今日数据获取失败**
+
+原因：期货行情数据缺失或过期
+
+建议：
+1. 检查网络连接和 AKShare API 可用性
+2. 手动确认 {symbol} 今日收盘价
+3. 关注系统日志排查问题
+
+🕐 检测时间：{today}"""
+        return send_feishu_message(title, content, level="danger")
     
     spot_prices = get_all_spot_prices()
     receipt_data = get_latest_receipt_data("jd")
     
-    # 格式化报告
     today = date.today().strftime("%Y-%m-%d")
     title = f"📊 {symbol} 每日数据汇总 ({today})"
     content = format_daily_report(futures_data, spot_prices, receipt_data)
     
-    # 发送飞书消息
     result = send_feishu_message(title, content, level="info")
     
     if result:

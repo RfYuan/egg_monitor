@@ -9,6 +9,7 @@ from src.collectors.futures_collector import SUPPORTED_SYMBOLS
 BASE_DIR = Path(__file__).parent.parent.parent
 RULES_PATH = BASE_DIR / "config" / "alert_rules.yaml"
 
+
 def load_rules():
     try:
         with open(RULES_PATH, "r", encoding="utf-8") as f:
@@ -17,6 +18,27 @@ def load_rules():
     except Exception as e:
         log.error(f"Failed to load rules: {e}")
         return []
+
+
+def _normalize_symbol(symbol: str) -> str:
+    """标准化合约代码，去除前缀和后缀，统一大写"""
+    if not symbol:
+        return ""
+    s = symbol.upper().strip()
+    for prefix in ["DCE.", "SHFE.", "CFFEX.", "INE."]:
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+    return s
+
+
+def _match_symbol(rule_symbol: str, db_symbol: str) -> bool:
+    """灵活匹配合约代码，支持多种格式"""
+    if not rule_symbol:
+        return True
+    rule_norm = _normalize_symbol(rule_symbol)
+    db_norm = _normalize_symbol(db_symbol)
+    return rule_norm == db_norm
+
 
 def check_price_rule(rule, latest_price):
     condition = rule["condition"]
@@ -28,6 +50,7 @@ def check_price_rule(rule, latest_price):
         return True
     
     return False
+
 
 def run_all_checks():
     rules = load_rules()
@@ -46,9 +69,9 @@ def run_all_checks():
             for rule in rules:
                 try:
                     condition = rule.get("condition", {})
-                    rule_symbol = condition.get("symbol", "").upper()
-                    # 规则指定了合约时，只检查对应合约；未指定时对所有合约检查
-                    if rule_symbol and rule_symbol != symbol_upper:
+                    rule_symbol = condition.get("symbol", "")
+                    
+                    if not _match_symbol(rule_symbol, symbol_upper):
                         continue
 
                     if check_price_rule(rule, latest_price):
