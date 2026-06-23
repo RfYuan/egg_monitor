@@ -1,7 +1,6 @@
-
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Set
-import akshare as ak
+
 from src.storage.database import SessionLocal
 from src.storage.crud import (
     create_futures_quote,
@@ -9,13 +8,21 @@ from src.storage.crud import (
     get_futures_quote_dates,
 )
 from src.utils.logger import log
+from src.collectors.futures_client import FuturesDataClient, DataSourceType
 
 SUPPORTED_SYMBOLS = ["jd2607", "jd2608", "jd2609"]
 
+# 全局统一客户端实例（大商所为第一数据源）
+_futures_client = None
 
-# ===================================================================
-#  公开接口 — 均走 DB 优先缓存策略
-# ===================================================================
+
+def _get_client() -> FuturesDataClient:
+    """获取统一期货数据客户端实例"""
+    global _futures_client
+    if _futures_client is None:
+        _futures_client = FuturesDataClient(primary_source=DataSourceType.DCE)
+    return _futures_client
+
 
 def _is_today_data(data_date: date) -> bool:
     """检查数据日期是否为今天"""
@@ -31,14 +38,17 @@ def fetch_latest_quote(symbol: str) -> Optional[Dict]:
     """
     获取单个合约最新一日行情（优先从数据库读取，但严格验证日期）
 
-    策略：
-      1. 查库 → 最近一条记录的日期 == 今天 → 直接返回
-      2. 库中无今天数据 → 调 AKShare 获取最新并存入
-      3. API也失败 → 返回None（**禁止返回过期数据**）
+    数据源优先级：
+      1. 数据库缓存（如果日期为今天）
+      2. 大商所官方API（第一优先级）
+      3. AKShare（备用数据源）
 
     重要原则：禁止返回过期数据误导用户
     """
     today = date.today()
+    client = _get_client()
+    
+    # ---- 1. 尝试从数据库读取 ----
     db = SessionLocal()
     try:
         rows = get_futures_quotes_by_date_range(
@@ -48,27 +58,30 @@ def fetch_latest_quote(symbol: str) -> Optional[Dict]:
         )
         if rows:
             latest = rows[-1]
-            log.info(f"[CACHE HIT] {symbol} latest quote from DB: close={latest.close}")
+            log.info(f"[CACHE HIT] {symbol} latest quote from DB: close={latest.close}, date={latest.datetime.date()}")
             return _orm_to_dict(latest)
+        else:
+            log.info(f"[CACHE MISS] {symbol} no today data in DB, fetching from API...")
     except Exception as e:
-        log.warning(f"DB query failed for {symbol}: {e}, fallback to API")
+        log.warning(f"[DB ERROR] {symbol} query failed: {e}, fallback to API")
     finally:
         db.close()
 
-    log.info(f"[CACHE MISS] {symbol} fetching latest from AKShare...")
-    try:
-        df = _fetch_akshare(symbol)
-        if df is not None and not df.empty:
-            row = _row_to_dict(df.iloc[-1], symbol)
-            if _is_today_data(row["datetime"].date()):
-                _save_one(row)
-                return row
-            else:
-                log.warning(f"[DATA STALE] {symbol} API returned non-today data: {row['datetime'].date()}, ignoring")
-    except Exception as e:
-        log.error(f"API fetch failed for {symbol}: {e}")
+    # ---- 2. 使用统一客户端从API获取 ----
+    log.info(f"[API] {symbol} 尝试从统一客户端获取数据...")
+    data = client.get_latest_quote(symbol)
     
-    log.error(f"[CRITICAL] {symbol} No valid today data available! Cannot return stale data.")
+    if data:
+        if _is_today_data(data["datetime"].date()):
+            log.info(f"[API SUCCESS] {symbol} 获取今日数据成功: close={data['close']}, source={data['source']}")
+            _save_one(data)
+            return data
+        else:
+            log.warning(f"[API STALE] {symbol} API返回过期数据: {data['datetime'].date()}, source={data['source']}")
+    else:
+        log.warning(f"[API FAILED] {symbol} 所有数据源均失败")
+    
+    log.error(f"[CRITICAL] {symbol} 无法获取今日数据！禁止返回过期数据误导用户。")
     return None
 
 
@@ -79,7 +92,7 @@ def fetch_history(symbol: str, start_date: str, end_date: Optional[str] = None) 
     流程：
       1. 查询 DB 中 [start_date, end_date] 区间已有数据
       2. 计算缺失日期集合
-      3. 若有缺口 → 调 AKShare 补拉缺口日期的数据
+      3. 若有缺口 → 调统一客户端补拉缺口日期的数据
       4. 合并去重，按日期升序返回
 
     Args:
@@ -120,17 +133,24 @@ def fetch_history(symbol: str, start_date: str, end_date: Optional[str] = None) 
     log.info(f"[GAP] {symbol}: need to fetch {len(missing_dates)} missing dates: "
              f"{sorted(missing_dates)[0]} ~ {sorted(missing_dates)[-1]}")
 
-    # ---- 3. 仅对缺失日期调 API ----
-    api_results = _fetch_missing_from_api(symbol, missing_dates)
+    # ---- 3. 使用统一客户端获取缺失日期数据 ----
+    client = _get_client()
+    api_results = client.get_historical_quotes(symbol, start_date, end_date)
+    
+    # 过滤出确实缺失的日期
+    filtered_results = []
+    for r in api_results:
+        if r["datetime"].date() in missing_dates:
+            filtered_results.append(r)
 
     # ---- 4. 合并去重返回 ----
     merged = {r["datetime"].date(): r for r in db_results}
-    for r in api_results:
+    for r in filtered_results:
         merged[r["datetime"].date()] = r
 
     result = sorted(merged.values(), key=lambda x: x["datetime"])
     log.info(f"[MERGE] {symbol}: total {len(result)} records "
-             f"(DB={len(db_results)}, API={len(api_results)})")
+             f"(DB={len(db_results)}, API={len(filtered_results)})")
     return result
 
 
@@ -160,7 +180,6 @@ def collect_and_save_history(symbols: List[str], start_date: str, end_date: Opti
     counts = {}
     db = SessionLocal()
     try:
-        # 已有日期集合，用于跳过重复写入
         saved_counts = {}
         for sym in symbols:
             existing = get_futures_quote_dates(db, sym.upper())
@@ -182,62 +201,9 @@ def collect_and_save_history(symbols: List[str], start_date: str, end_date: Opti
     return counts
 
 
-# ===================================================================
-#  内部函数
-# ===================================================================
-
-def _fetch_akshare(symbol: str):
-    """调用 AKShare 获取原始 DataFrame"""
-    return ak.futures_zh_daily_sina(symbol=symbol)
-
-
-def _fetch_missing_from_api(symbol: str, missing_dates: Set[date]) -> List[Dict]:
-    """仅拉取缺失日期的数据"""
-    if not missing_dates:
-        return []
-
-    try:
-        df = _fetch_akshare(symbol)
-        if df is None or df.empty:
-            log.warning(f"[API] No data returned for {symbol} (may be not listed yet)")
-            return []
-
-        results = []
-        for _, row in df.iterrows():
-            # 兼容列名：date/日期
-            dt_str = str(row.get("date", row.get("日期")))
-            dt = _parse_date(dt_str)
-            if dt and dt.date() in missing_dates:
-                results.append(_row_to_dict(row, symbol))
-
-        log.info(f"[API] {symbol}: fetched {len(results)} records for missing dates")
-        return results
-    except Exception as e:
-        log.error(f"[API] Failed to fetch missing data for {symbol}: {e}")
-        return []
-
-
-def _row_to_dict(row, symbol: str) -> Dict:
-    """AKShare DataFrame 行 → 字典（兼容中英文列名）"""
-    # 兼容列名
-    dt_str = str(row.get("date", row.get("日期")))
-    dt = _parse_date(dt_str) or datetime.now()
-
-    return {
-        "symbol": symbol.upper(),
-        "datetime": dt,
-        "open": float(row.get("open", row.get("开盘"))),
-        "high": float(row.get("high", row.get("最高"))),
-        "low": float(row.get("low", row.get("最低"))),
-        "close": float(row.get("close", row.get("收盘"))),
-        "volume": int(row.get("volume", row.get("成交量"))),
-        "open_interest": int(row.get("hold", row.get("持仓量", 0))),
-    }
-
-
 def _orm_to_dict(orm_obj) -> Dict:
     """SQLAlchemy ORM 对象 → 字典"""
-    return {
+    data = {
         "symbol": orm_obj.symbol,
         "datetime": orm_obj.datetime,
         "open": float(orm_obj.open),
@@ -247,6 +213,9 @@ def _orm_to_dict(orm_obj) -> Dict:
         "volume": int(orm_obj.volume),
         "open_interest": int(orm_obj.open_interest),
     }
+    if hasattr(orm_obj, 'settle') and orm_obj.settle is not None:
+        data["settle"] = float(orm_obj.settle)
+    return data
 
 
 def _parse_date(dt_str: str) -> Optional[datetime]:
@@ -275,7 +244,10 @@ def _save_one(quote: Dict):
     """单条写入数据库"""
     db = SessionLocal()
     try:
-        create_futures_quote(db, quote)
+        # 过滤掉数据库模型不支持的字段
+        valid_fields = ["symbol", "datetime", "open", "high", "low", "close", "settle", "volume", "open_interest"]
+        clean_quote = {k: v for k, v in quote.items() if k in valid_fields}
+        create_futures_quote(db, clean_quote)
     except Exception as e:
         log.warning(f"Save one record failed (may be duplicate): {e}")
     finally:

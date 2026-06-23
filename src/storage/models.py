@@ -12,6 +12,7 @@ class FuturesQuote(Base):
     high = Column(Numeric(10, 2), nullable=False)
     low = Column(Numeric(10, 2), nullable=False)
     close = Column(Numeric(10, 2), nullable=False)
+    settle = Column(Numeric(10, 2), nullable=True)  # 结算价（可选）
     volume = Column(Integer, nullable=False)
     open_interest = Column(Integer, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
