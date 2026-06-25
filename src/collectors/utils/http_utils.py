@@ -4,12 +4,35 @@ HTTP 工具模块
 """
 
 import time
+import socket
 import requests
 from typing import Optional, Dict, Any
 from urllib.parse import urljoin
 
 from src.utils.logger import log
 from src.collectors.base.retry import with_retry
+
+
+def _force_ipv4():
+    """
+    强制使用IPv4
+    
+    解决服务器环境下IPv6不可达的问题：
+    - Python的requests库默认优先尝试IPv6连接
+    - 如果服务器没有配置IPv6，会立即失败
+    - 此函数通过修改socket.getaddrinfo强制只使用IPv4
+    """
+    try:
+        orig_getaddrinfo = socket.getaddrinfo
+        
+        def new_getaddrinfo(host, port, family=0, socktype=0, proto=0, flags=0):
+            # 强制使用IPv4（socket.AF_INET）
+            return orig_getaddrinfo(host, port, socket.AF_INET, socktype, proto, flags)
+        
+        socket.getaddrinfo = new_getaddrinfo
+        log.debug("[HttpClient] 已强制使用IPv4")
+    except Exception as e:
+        log.warning(f"[HttpClient] 强制IPv4失败: {e}")
 
 
 # 标准浏览器请求头
@@ -20,6 +43,10 @@ DEFAULT_HEADERS = {
     "Accept-Encoding": "gzip, deflate",
     "Connection": "keep-alive",
 }
+
+
+# 模块初始化时强制使用IPv4
+_force_ipv4()
 
 
 class HttpClient:

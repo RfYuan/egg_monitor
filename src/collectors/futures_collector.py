@@ -244,11 +244,11 @@ def _save_one(quote: Dict):
     """单条写入数据库"""
     db = SessionLocal()
     try:
-        # 过滤掉数据库模型不支持的字段
         valid_fields = ["symbol", "datetime", "open", "high", "low", "close", "settle", "volume", "open_interest"]
         clean_quote = {k: v for k, v in quote.items() if k in valid_fields}
         create_futures_quote(db, clean_quote)
+        log.info(f"[DB SAVE] {quote['symbol']} saved successfully: close={quote['close']}, date={quote['datetime'].date()}")
     except Exception as e:
-        log.warning(f"Save one record failed (may be duplicate): {e}")
+        log.warning(f"[DB SAVE] {quote.get('symbol', 'unknown')} save failed (may be duplicate): {e}")
     finally:
         db.close()

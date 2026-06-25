@@ -111,7 +111,7 @@ class SpotPriceSpider(BaseSpider):
         
         # 如果无法解析，返回空列表
         # 后续人工确认网站结构后更新解析逻辑
-        log.warning("[SpotPrice] 无法解析页面结构，使用示例数据")
+        log.error("[SpotPrice] 无法解析页面结构，返回空数据")
         return []
     
     def _extract_price_info(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:

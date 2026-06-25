@@ -20,7 +20,7 @@ def create_futures_quote(db: Session, quote: dict):
     return db_quote
 
 def get_futures_quotes(db: Session, symbol: str, limit: int = 100):
-    return db.query(FuturesQuote).filter(FuturesQuote.symbol == symbol).order_by(FuturesQuote.datetime.desc()).limit(limit).all()
+    return db.query(FuturesQuote).filter(FuturesQuote.symbol == symbol.upper()).order_by(FuturesQuote.datetime.desc()).limit(limit).all()
 
 def get_futures_quotes_by_date_range(db: Session, symbol: str, start_date: datetime, end_date: datetime) -> List:
     """查询指定合约在日期范围内的所有行情记录（升序）"""
